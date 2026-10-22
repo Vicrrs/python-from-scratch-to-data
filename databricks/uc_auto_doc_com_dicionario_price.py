@@ -468,3 +468,40 @@ def aplicar_do_log(execucao_desde: str):
     print(f"\n✅ {ok} aplicados | ❌ {erros} erros | Total: {len(pend)}")
 
 # aplicar_do_log("2026-10-08")
+
+
+
+# COMMAND ----------
+
+WITH cols AS (
+  SELECT table_catalog, table_schema, table_name,
+         count(*) AS n_cols,
+         count_if(comment IS NULL OR comment = '') AS cols_sem_comentario
+  FROM system.information_schema.columns
+  WHERE table_catalog NOT IN ('system', 'samples', 'hive_metastore', '__databricks_internal')
+    AND table_schema <> 'information_schema'
+  GROUP BY ALL
+),
+tabs AS (
+  SELECT t.table_catalog, t.table_schema, t.table_name,
+         (t.comment IS NULL OR t.comment = '' OR c.cols_sem_comentario > 0) AS nao_documentada,
+         c.n_cols
+  FROM system.information_schema.tables t
+  JOIN cols c USING (table_catalog, table_schema, table_name)
+)
+SELECT
+  coalesce(table_catalog, 'TOTAL')                       AS catalogo,
+  count(DISTINCT table_schema)                           AS schemas,
+  count(*)                                               AS tabelas,
+  count_if(nao_documentada)                              AS tabelas_nao_documentadas,
+  sum(n_cols)                                            AS colunas,
+  -- conta de padeiro: US$ 0,0107 por tabela + US$ 0,0036 por schema
+  round(count_if(nao_documentada) * 0.0107
+        + count(DISTINCT table_schema) * 0.0036, 2)      AS custo_estimado_usd,
+  round((count_if(nao_documentada) * 0.0107
+        + count(DISTINCT table_schema) * 0.0036) * 1.5, 2) AS custo_com_margem_usd
+FROM tabs
+GROUP BY ROLLUP (table_catalog)
+ORDER BY catalogo = 'TOTAL', custo_estimado_usd DESC
+
+# COMMAND ----------
