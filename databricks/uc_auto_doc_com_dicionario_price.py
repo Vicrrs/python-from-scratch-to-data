@@ -505,3 +505,34 @@ GROUP BY ROLLUP (table_catalog)
 ORDER BY catalogo = 'TOTAL', custo_estimado_usd DESC
 
 # COMMAND ----------
+
+
+WITH cols AS (
+  SELECT table_catalog, table_schema, table_name,
+         count(*) AS n_cols,
+         count_if(comment IS NULL OR comment = '') AS cols_sem_comentario
+  FROM system.information_schema.columns
+  WHERE table_catalog NOT IN ('system', 'samples', 'hive_metastore', '__databricks_internal')
+    AND table_schema <> 'information_schema'
+  GROUP BY ALL
+),
+tabs AS (
+  SELECT t.table_catalog, t.table_schema, t.table_name, c.n_cols,
+         (t.comment IS NULL OR t.comment = '' OR c.cols_sem_comentario > 0) AS nao_documentada
+  FROM system.information_schema.tables t
+  JOIN cols c USING (table_catalog, table_schema, table_name)
+)
+SELECT
+  coalesce(table_catalog, 'TOTAL')                          AS catalogo,
+  count(DISTINCT table_schema)                              AS schemas,
+  count(*)                                                  AS tabelas,
+  count_if(nao_documentada)                                 AS tabelas_nao_documentadas,
+  sum(CASE WHEN nao_documentada THEN n_cols ELSE 0 END)     AS colunas_a_documentar,
+  max(CASE WHEN nao_documentada THEN n_cols END)            AS maior_tabela_colunas,
+  round(  count_if(nao_documentada) * 0.0036                         -- fixo por tabela
+        + sum(CASE WHEN nao_documentada THEN n_cols ELSE 0 END) * 0.0009  -- por coluna
+        + count(DISTINCT table_schema) * 0.0036, 2)                  -- resumo do schema
+                                                            AS custo_estimado_usd
+FROM tabs
+GROUP BY ROLLUP (table_catalog)
+ORDER BY catalogo = 'TOTAL', custo_estimado_usd DESC
