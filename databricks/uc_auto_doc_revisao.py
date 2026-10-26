@@ -20,8 +20,12 @@ dbutils.library.restartPython()
 
 # COMMAND ----------
 
-# ---------------- Parâmetros ----------------
+# Limpa widgets antigos (precisa ficar em célula separada da que os recria)
 dbutils.widgets.removeAll()
+
+# COMMAND ----------
+
+# ---------------- Parâmetros ----------------
 # >>> ONDE GRAVAR: caminho completo catalogo.schema.nome_da_tabela (criada se não existir)
 dbutils.widgets.text("tabela_destino", "data_science_dev.churn_models.uc_doc_revisao", "Tabela destino (catalogo.schema.tabela)")
 dbutils.widgets.text("catalogos_incluir", "","Catálogos a incluir (vírgula; vazio = todos)")
@@ -467,3 +471,35 @@ display(spark.sql(f"""
     FROM {DESTINO}
     GROUP BY catalogo ORDER BY catalogo
 """))
+
+
+
+
+
+
+# COMMAND ----------
+
+
+WITH existentes AS (
+  SELECT table_catalog AS catalogo, COUNT(*) AS tabelas_existentes
+  FROM system.information_schema.tables
+  WHERE table_catalog NOT IN ('system', 'samples', 'hive_metastore', '__databricks_internal')
+    AND table_schema <> 'information_schema'
+  GROUP BY table_catalog
+),
+documentadas AS (
+  SELECT catalogo, COUNT(DISTINCT caminho_tabela) AS tabelas_documentadas,
+         ROUND(SUM(custo), 2) AS custo_usd
+  FROM (SELECT DISTINCT catalogo, caminho_tabela, custo_tabela_usd AS custo
+        FROM data_science_dev.churn_models.uc_doc_revisao)
+  GROUP BY catalogo
+)
+SELECT e.catalogo,
+       e.tabelas_existentes,
+       COALESCE(d.tabelas_documentadas, 0) AS tabelas_documentadas,
+       ROUND(100 * COALESCE(d.tabelas_documentadas, 0) / e.tabelas_existentes, 1) AS pct_cobertura,
+       COALESCE(d.custo_usd, 0) AS custo_usd
+FROM existentes e
+LEFT JOIN documentadas d USING (catalogo)
+ORDER BY pct_cobertura, e.tabelas_existentes DESC;
+
