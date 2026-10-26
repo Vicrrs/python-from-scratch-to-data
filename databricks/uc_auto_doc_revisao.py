@@ -86,8 +86,12 @@ print(f"{len(ja_gravadas)} tabelas já existem em {DESTINO}")
 
 # COMMAND ----------
 
-assert "IDIOMA" in globals(), "Rode a célula de Parâmetros antes (ou use Run all)."
 import json, re, time, datetime, uuid
+# Widgets sobrevivem ao restartPython; relê caso a célula de Parâmetros não tenha rodado
+IDIOMA          = dbutils.widgets.get("idioma")
+MODELO          = dbutils.widgets.get("modelo_endpoint")
+PRECO_INPUT_1M  = float(dbutils.widgets.get("preco_input_1m"))
+PRECO_OUTPUT_1M = float(dbutils.widgets.get("preco_output_1m"))
 from databricks.sdk import WorkspaceClient
 
 # Contador global de tokens; cada operação mede a diferença antes/depois
