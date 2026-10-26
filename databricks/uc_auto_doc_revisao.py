@@ -2,18 +2,28 @@
 # MAGIC %md
 # MAGIC # Auto-documentação do Unity Catalog com LLM — modo revisão
 # MAGIC Não altera NENHUM comentário no Unity Catalog. Tudo que o LLM gera é gravado numa tabela nova
-# MAGIC (`caminho_destino`.`nome_tabela_destino`), com **1 linha por coluna** contendo:
+# MAGIC (widget `tabela_destino` = `catalogo.schema.tabela`), com **1 linha por coluna** contendo:
 # MAGIC catálogo, schema, tabela, coluna, descrição do catálogo / schema / tabela / linha / coluna e o custo de cada operação.
 # MAGIC
 # MAGIC A tabela tem campos de revisão (`status_revisao`, `descricao_corrigida`, `revisado_por`, ...) para o time
 # MAGIC responsável confirmar ou corrigir o que foi gerado. Reprocessar não apaga o que já foi revisado.
+# MAGIC
+# MAGIC **Use sempre "Run all"** (a 1ª célula reinicia o Python e apaga as variáveis; as demais dependem da célula de Parâmetros).
+
+# COMMAND ----------
+
+# MAGIC %pip install -U -q databricks-openai databricks-sdk openai
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
 # ---------------- Parâmetros ----------------
 dbutils.widgets.removeAll()
-dbutils.widgets.text("caminho_destino", "data_science_dev.churn_models", "Destino: catalogo.schema")
-dbutils.widgets.text("nome_tabela_destino", "uc_doc_revisao", "Destino: nome da tabela")
+# >>> ONDE GRAVAR: caminho completo catalogo.schema.nome_da_tabela (criada se não existir)
+dbutils.widgets.text("tabela_destino", "data_science_dev.churn_models.uc_doc_revisao", "Tabela destino (catalogo.schema.tabela)")
 dbutils.widgets.text("catalogos_incluir", "data_science_dev", "Catálogos a incluir (vírgula; vazio = todos)")
 dbutils.widgets.text("catalogos_excluir", "system,samples,hive_metastore,__databricks_internal", "Catálogos a excluir")
 dbutils.widgets.text("schemas_incluir", "", "Schemas a incluir (vírgula; vazio = todos)")
@@ -29,7 +39,8 @@ dbutils.widgets.text("preco_output_1m", "15.00", "US$ por 1M tokens de saída")
 def _lista(nome):
     return [x.strip() for x in dbutils.widgets.get(nome).split(",") if x.strip()]
 
-DESTINO         = f"{dbutils.widgets.get('caminho_destino').strip()}.{dbutils.widgets.get('nome_tabela_destino').strip()}"
+DESTINO         = dbutils.widgets.get("tabela_destino").strip()
+assert DESTINO.count(".") == 2, f"tabela_destino deve ser catalogo.schema.tabela (recebido: '{DESTINO}')"
 CAT_INCLUIR     = _lista("catalogos_incluir")
 CAT_EXCLUIR     = set(_lista("catalogos_excluir"))
 SCHEMA_INCLUIR  = set(_lista("schemas_incluir"))
@@ -49,6 +60,7 @@ print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_ta
 # COMMAND ----------
 
 # ---------------- Tabela de destino ----------------
+assert "DESTINO" in globals(), "Rode a célula de Parâmetros antes (ou use Run all)."
 # Colunas geradas pelo notebook + colunas de revisão (preenchidas pelo time dono da tabela).
 spark.sql(f"""
     CREATE TABLE IF NOT EXISTS {DESTINO} (
@@ -74,6 +86,7 @@ print(f"{len(ja_gravadas)} tabelas já existem em {DESTINO}")
 
 # COMMAND ----------
 
+assert "IDIOMA" in globals(), "Rode a célula de Parâmetros antes (ou use Run all)."
 import json, re, time, datetime, uuid
 from databricks.sdk import WorkspaceClient
 
@@ -105,7 +118,23 @@ def medir(objeto, inicio) -> dict:
     return dict(chamadas=chamadas, tokens=entrada + saida, custo=custo)
 
 w = WorkspaceClient()
-llm = w.serving_endpoints.get_open_ai_client()   # cliente OpenAI-compatível autenticado no workspace
+
+def _cliente_llm():
+    """Cliente OpenAI-compatível autenticado no workspace, para qualquer versão de SDK."""
+    try:
+        from databricks_openai import DatabricksOpenAI   # forma recomendada atual
+        return DatabricksOpenAI()
+    except ImportError:
+        pass
+    if hasattr(w.serving_endpoints, "get_open_ai_client"):
+        return w.serving_endpoints.get_open_ai_client()
+    # SDK antigo: monta o cliente com host + token do próprio notebook
+    from openai import OpenAI
+    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+    return OpenAI(api_key=ctx.apiToken().get(),
+                  base_url=f"https://{ctx.browserHostName().get()}/serving-endpoints")
+
+llm = _cliente_llm()
 
 SYSTEM_PROMPT = f"""Você é um engenheiro de dados sênior responsável pela governança e pelo catálogo de dados da empresa.
 Escreva descrições de negócio claras, objetivas e úteis para analistas e para o Genie (AI/BI).
@@ -277,6 +306,7 @@ def gravar_resumos(resumos):
 
 # ---------------- Varredura ----------------
 # Grava ao final de cada catálogo: se cair no meio, o que já rodou fica salvo e é pulado na próxima execução.
+assert "llm" in globals() and "ja_gravadas" in globals(), "Rode as células anteriores antes (ou use Run all)."
 catalogos = [c for c in w.catalogs.list()
              if c.name not in CAT_EXCLUIR and (not CAT_INCLUIR or c.name in CAT_INCLUIR)]
 print(f"Catálogos a processar: {[c.name for c in catalogos]}")
