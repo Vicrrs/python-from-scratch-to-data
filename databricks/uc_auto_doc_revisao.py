@@ -59,6 +59,17 @@ print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_ta
 
 # COMMAND ----------
 
+# ---------------- Diagnóstico de acesso ----------------
+# w.catalogs.list() só devolve catálogos que o usuário tem permissão de ver
+from databricks.sdk import WorkspaceClient
+print("Usuário:", spark.sql("SELECT current_user()").first()[0])
+_visiveis = [c.name for c in WorkspaceClient().catalogs.list()]
+print("Visíveis:", _visiveis)
+print("Filtro incluir:", CAT_INCLUIR, "| excluir:", CAT_EXCLUIR)
+print("Vão processar:", [c for c in _visiveis if c not in CAT_EXCLUIR and (not CAT_INCLUIR or c in CAT_INCLUIR)])
+
+# COMMAND ----------
+
 # ---------------- Tabela de destino ----------------
 assert "DESTINO" in globals(), "Rode a célula de Parâmetros antes (ou use Run all)."
 # Colunas geradas pelo notebook + colunas de revisão (preenchidas pelo time dono da tabela).
