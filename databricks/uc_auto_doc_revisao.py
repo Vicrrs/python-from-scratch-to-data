@@ -201,7 +201,7 @@ def chamar_llm(prompt: str, tentativas: int = 6) -> dict:   # mais tentativas: p
             texto = re.sub(r"^```(json)?|```$", "", texto, flags=re.M).strip()
             return json.loads(texto)
         except Exception as e:
-            espera = 2 ** i * 5
+            espera = min(2 ** i * 5, 60)   # teto: não deixa uma tabela presa minutos esperando
             print(f"   ⚠ erro LLM ({e.__class__.__name__}: {e}); nova tentativa em {espera}s")
             time.sleep(espera)
     raise RuntimeError("LLM falhou após várias tentativas")
@@ -234,7 +234,9 @@ def documentar_tabela(t) -> tuple[str, str, list[dict]]:
                     particao=c.partition_index is not None)
                for c in (t.columns or [])]
 
+    t0 = time.time()
     dados_amostra = amostra(fqn)
+    t_amostra = time.time() - t0
     desc_tabela, desc_linha, desc_cols = None, None, {}
 
     lotes = [colunas[i:i + MAX_COLS_POR_CHAMADA] for i in range(0, len(colunas), MAX_COLS_POR_CHAMADA)] or [[]]
@@ -269,7 +271,8 @@ Retorne JSON no formato:
 
     for c in colunas:
         c["descricao"] = desc_cols.get(c["nome"])
-    print(f"   ✓ {t.full_name}: {len(desc_cols)}/{len(colunas)} colunas descritas")
+    print(f"   ✓ {t.full_name}: {len(desc_cols)}/{len(colunas)} colunas descritas "
+          f"(amostra {t_amostra:.0f}s | LLM {time.time() - t0 - t_amostra:.0f}s em {len(lotes)} chamada(s))")
     return desc_tabela, desc_linha, colunas
 
 def resumir(nivel: str, nome: str, filhos: dict, atual: str | None) -> str:
@@ -347,12 +350,15 @@ def gravar_resumos(resumos):
 # COMMAND ----------
 
 # ---------------- Varredura ----------------
-# Tabelas são documentadas em paralelo (PARALELISMO threads) e gravadas a cada LOTE_GRAVACAO tabelas:
-# se cair no meio, o que já rodou fica salvo e é pulado na próxima execução.
-from concurrent.futures import ThreadPoolExecutor
+# 1) planeja (só metadados), 2) documenta TODAS as tabelas num único pool de PARALELISMO threads,
+# gravando a cada LOTE_GRAVACAO tabelas sem parar as threads, 3) resume schemas/catálogos em paralelo.
+# Se cair no meio, o que já foi gravado é pulado na próxima execução.
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter, defaultdict
 assert "llm" in globals() and "ja_gravadas" in globals(), "Rode as células anteriores antes (ou use Run all)."
 catalogos = [c for c in w.catalogs.list()
              if c.name not in CAT_EXCLUIR and (not CAT_INCLUIR or c.name in CAT_INCLUIR)]
+cat_por_nome = {c.name: c for c in catalogos}
 print(f"Catálogos a processar: {[c.name for c in catalogos]}")
 
 def processar_tabela(t):
@@ -377,40 +383,33 @@ def processar_tabela(t):
         for pos, c in enumerate(colunas, start=1)]
 
 pool = ThreadPoolExecutor(max_workers=PARALELISMO)
-tabelas_exec = 0   # tabelas novas nesta execução (limite MAX_TAB_EXEC)
 
-def limite_execucao():
-    return MAX_TAB_EXEC > 0 and tabelas_exec >= MAX_TAB_EXEC
+# ---- 1) Planejamento: lista schemas/tabelas (só API de metadados) respeitando os limites ----
+def _listar_tabelas(sch):
+    try:
+        return list(w.tables.list(catalog_name=sch.catalog_name, schema_name=sch.name))
+    except Exception as e:
+        print(f"   ✗ {sch.full_name}: sem acesso às tabelas: {e}")
+        return None
 
+plano = defaultdict(list)   # catálogo -> [(schema, todas_as_tabelas, pendentes)]
+tabelas_exec = 0            # tabelas novas nesta execução (limite MAX_TAB_EXEC)
 for cat in catalogos:
-    if limite_execucao():
-        print(f"\n⏹ limite de {MAX_TAB_EXEC} tabelas por execução atingido; rode de novo para continuar")
+    if MAX_TAB_EXEC > 0 and tabelas_exec >= MAX_TAB_EXEC:
+        print(f"⏹ limite de {MAX_TAB_EXEC} tabelas por execução atingido; rode de novo para continuar")
         break
-    print(f"\n📚 Catálogo {cat.name}")
-    resumos, desc_schemas = [], {}
-    tabelas_cat = colunas_cat = 0
     try:
         schemas = [s for s in w.schemas.list(catalog_name=cat.name)
                    if s.name not in SCHEMA_EXCLUIR and (not SCHEMA_INCLUIR or s.name in SCHEMA_INCLUIR)]
     except Exception as e:
-        print(f"   ✗ sem acesso aos schemas: {e}")
+        print(f"   ✗ {cat.name}: sem acesso aos schemas: {e}")
         continue
-
-    for sch in schemas:
-        if limite_execucao():
-            break
-        if MAX_TAB_CAT > 0 and tabelas_cat >= MAX_TAB_CAT:
-            print(f"   ⏭ limite de {MAX_TAB_CAT} tabelas atingido para {cat.name}")
-            break
-        print(f"  📁 Schema {sch.full_name}")
-        try:
-            tabelas = list(w.tables.list(catalog_name=cat.name, schema_name=sch.name))
-        except Exception as e:
-            print(f"   ✗ sem acesso às tabelas: {e}")
+    tabelas_cat = 0
+    for sch, tabelas in zip(schemas, pool.map(_listar_tabelas, schemas)):
+        if tabelas is None:
             continue
-
-        # contexto do schema: descrições já gravadas + as geradas agora
-        desc_tabelas = {t.name: ja_gravadas[t.full_name] for t in tabelas if t.full_name in ja_gravadas}
+        if (MAX_TAB_EXEC > 0 and tabelas_exec >= MAX_TAB_EXEC) or (MAX_TAB_CAT > 0 and tabelas_cat >= MAX_TAB_CAT):
+            break
         pendentes = [t for t in tabelas if REPROCESSAR or t.full_name not in ja_gravadas]
         if MAX_TAB_CAT > 0:
             pendentes = pendentes[:MAX_TAB_CAT - tabelas_cat]
@@ -418,57 +417,80 @@ for cat in catalogos:
             pendentes = pendentes[:MAX_TAB_EXEC - tabelas_exec]
         tabelas_cat += len(pendentes)
         tabelas_exec += len(pendentes)
-        if pendentes:
-            print(f"   {len(pendentes)} tabelas a documentar ({len(tabelas) - len(pendentes)} já gravadas)")
+        plano[cat.name].append((sch, tabelas, pendentes))
+    print(f"📚 {cat.name}: {len(plano[cat.name])} schemas | {tabelas_cat} tabelas a documentar")
 
-        novas = 0
-        for i in range(0, len(pendentes), LOTE_GRAVACAO):
-            lote = pendentes[i:i + LOTE_GRAVACAO]
-            linhas = []
-            for t, res in zip(lote, pool.map(processar_tabela, lote)):
-                if res is None:
-                    continue
-                desc_tabelas[t.name], linhas_t = res
-                linhas += linhas_t
-                novas += 1
-            gravar_linhas(linhas)
-            colunas_cat += len(linhas)
-            print(f"   💾 {i + len(lote)}/{len(pendentes)} tabelas de {sch.full_name} processadas")
+# ---- 2) Documentação: todas as tabelas no mesmo pool; o MERGE roda na thread principal ----
+todas = [t for itens in plano.values() for _, _, pend in itens for t in pend]
+print(f"\n🚀 {len(todas)} tabelas a documentar com {PARALELISMO} threads")
+desc_novas, novas_schema = {}, Counter()
+linhas, n_lote, t_ini = [], 0, time.time()
+futuros = {pool.submit(processar_tabela, t): t for t in todas}
+for i, f in enumerate(as_completed(futuros), start=1):
+    t, res = futuros[f], f.result()
+    if res is not None:
+        desc_novas[t.full_name], linhas_t = res
+        linhas += linhas_t
+        novas_schema[(t.catalog_name, t.schema_name)] += 1
+    n_lote += 1
+    if n_lote >= LOTE_GRAVACAO or i == len(todas):
+        gravar_linhas(linhas)
+        linhas, n_lote = [], 0
+        mins = (time.time() - t_ini) / 60
+        print(f"💾 {i}/{len(todas)} tabelas | {mins:.0f} min | ~{mins / i * (len(todas) - i):.0f} min restantes | "
+              f"≈ US$ {custo_usd(USO['entrada'], USO['saida']):.2f}")
 
-        if not desc_tabelas:
-            continue
-        if novas == 0 and not REPROCESSAR:
-            # nada novo neste schema: reaproveita a descrição já gravada (sem custo)
-            atual = spark.sql(f"""
-                SELECT max(descricao_schema) AS d FROM {DESTINO}
-                WHERE catalogo = '{cat.name}' AND `schema` = '{sch.name}'""").first().d
-            if atual:
-                desc_schemas[sch.name] = atual
-                continue
-            # tabelas gravadas mas sem resumo (execução anterior interrompida): gera agora
-        inicio = inicio_operacao()
-        desc_schemas[sch.name] = resumir("schema", sch.full_name, desc_tabelas, sch.comment)
-        m = medir(sch.full_name, inicio)
-        resumos.append(dict(catalogo=cat.name, schema=sch.name, descricao_schema=desc_schemas[sch.name],
-                            comentario_schema_atual=sch.comment, tokens_schema=m["tokens"],
-                            custo_schema_usd=m["custo"]))
+# ---- 3) Resumos de schema e catálogo ----
+# descrições de schema já gravadas (1 consulta só, em vez de 1 por schema)
+schema_gravado = {(r[0], r[1]): r[2] for r in spark.sql(
+    f"SELECT catalogo, `schema`, max(descricao_schema) FROM {DESTINO} GROUP BY 1, 2").collect()}
 
-    # linhas já foram gravadas por lote, então o MERGE de schema/catálogo alcança as novas
-    if resumos:
-        inicio = inicio_operacao()
+def resumo_schema(args):
+    """Retorna (schema, descricao, linha_de_resumo|None) ou None se não houver o que resumir."""
+    cat_nome, sch, tabelas = args
+    desc_tabelas = {t.name: desc_novas.get(t.full_name) or ja_gravadas.get(t.full_name)
+                    for t in tabelas if t.full_name in desc_novas or t.full_name in ja_gravadas}
+    if not desc_tabelas:
+        return None
+    atual = schema_gravado.get((cat_nome, sch.name))
+    if atual and not REPROCESSAR and novas_schema[(cat_nome, sch.name)] == 0:
+        return sch.name, atual, None   # nada novo neste schema: reaproveita a descrição já gravada (sem custo)
+    inicio = inicio_operacao()
+    try:
+        desc = resumir("schema", sch.full_name, desc_tabelas, sch.comment)
+    except Exception as e:
+        print(f"   ✗ resumo {sch.full_name}: {e}")
+        return None
+    m = medir(sch.full_name, inicio)
+    return sch.name, desc, dict(catalogo=cat_nome, schema=sch.name, descricao_schema=desc,
+                                comentario_schema_atual=sch.comment, tokens_schema=m["tokens"],
+                                custo_schema_usd=m["custo"])
+
+for cat_nome, itens in plano.items():
+    cat = cat_por_nome[cat_nome]
+    res_schemas = [r for r in pool.map(resumo_schema, [(cat_nome, sch, tabs) for sch, tabs, _ in itens]) if r]
+    desc_schemas = {s: d for s, d, _ in res_schemas}
+    resumos = [r for _, _, r in res_schemas if r]
+    if not resumos:
+        continue
+    inicio = inicio_operacao()
+    try:
         desc_cat = resumir("catálogo", cat.name, desc_schemas, cat.comment)
-        m = medir(cat.name, inicio)
-        # o resumo do catálogo vale para todos os schemas dele, inclusive os não reprocessados agora
-        resumidos = {r["schema"] for r in resumos}
-        for s in desc_schemas:
-            if s not in resumidos:
-                resumos.append(dict(catalogo=cat.name, schema=s, descricao_schema=desc_schemas[s],
-                                    comentario_schema_atual=None, tokens_schema=None, custo_schema_usd=None))
-        for r in resumos:
-            r.update(descricao_catalogo=desc_cat, comentario_catalogo_atual=cat.comment,
-                     tokens_catalogo=m["tokens"], custo_catalogo_usd=m["custo"])
-        gravar_resumos(resumos)
-    print(f"   💾 {colunas_cat} colunas gravadas em {DESTINO}")
+    except Exception as e:
+        print(f"   ✗ resumo {cat.name}: {e}")
+        desc_cat = None
+    m = medir(cat.name, inicio)
+    # o resumo do catálogo vale para todos os schemas dele, inclusive os não reprocessados agora
+    resumidos = {r["schema"] for r in resumos}
+    for s in desc_schemas:
+        if s not in resumidos:
+            resumos.append(dict(catalogo=cat.name, schema=s, descricao_schema=desc_schemas[s],
+                                comentario_schema_atual=None, tokens_schema=None, custo_schema_usd=None))
+    for r in resumos:
+        r.update(descricao_catalogo=desc_cat, comentario_catalogo_atual=cat.comment,
+                 tokens_catalogo=m["tokens"], custo_catalogo_usd=m["custo"])
+    gravar_resumos(resumos)
+    print(f"📚 {cat.name}: resumos de {len(resumidos)} schemas + catálogo gravados")
 
 pool.shutdown()
 print(f"\n💰 Execução {ID_EXECUCAO}: {USO['chamadas']} chamadas | {USO['entrada']:,} tokens entrada | "
