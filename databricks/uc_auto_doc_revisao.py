@@ -37,6 +37,7 @@ dbutils.widgets.text("idioma", "português do Brasil", "Idioma das descrições"
 dbutils.widgets.dropdown("reprocessar", "false", ["true", "false"], "Reprocessar tabelas já gravadas no destino")
 dbutils.widgets.text("linhas_amostra", "5", "Linhas de amostra por tabela")
 dbutils.widgets.text("max_tabelas_catalogo", "0", "Máx tabelas por catálogo (0 = todas)")
+dbutils.widgets.text("max_tabelas_execucao", "500", "Máx tabelas novas nesta execução (0 = todas)")
 dbutils.widgets.text("preco_input_1m", "3.00", "US$ por 1M tokens de entrada")
 dbutils.widgets.text("preco_output_1m", "15.00", "US$ por 1M tokens de saída")
 dbutils.widgets.text("paralelismo", "4","Tabelas documentadas em paralelo")
@@ -55,6 +56,7 @@ IDIOMA          = dbutils.widgets.get("idioma")
 REPROCESSAR     = dbutils.widgets.get("reprocessar") == "true"
 N_AMOSTRA       = int(dbutils.widgets.get("linhas_amostra"))
 MAX_TAB_CAT     = int(dbutils.widgets.get("max_tabelas_catalogo"))
+MAX_TAB_EXEC    = int(dbutils.widgets.get("max_tabelas_execucao"))
 PRECO_INPUT_1M  = float(dbutils.widgets.get("preco_input_1m"))
 PRECO_OUTPUT_1M = float(dbutils.widgets.get("preco_output_1m"))
 PARALELISMO     = int(dbutils.widgets.get("paralelismo"))
@@ -62,7 +64,8 @@ PARALELISMO     = int(dbutils.widgets.get("paralelismo"))
 MAX_COLS_POR_CHAMADA = 60   # tabelas largas são documentadas em lotes de colunas
 MAX_CHARS_VALOR      = 80   # trunca valores longos da amostra
 LOTE_GRAVACAO        = 50   # grava no destino a cada N tabelas (não perde progresso se cair)
-print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_tabelas_cat={MAX_TAB_CAT} | paralelismo={PARALELISMO}")
+print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_tabelas_cat={MAX_TAB_CAT} | "
+      f"max_tabelas_exec={MAX_TAB_EXEC} | paralelismo={PARALELISMO}")
 if MAX_TAB_CAT > 0:
     print(f"⚠ max_tabelas_catalogo={MAX_TAB_CAT}: só {MAX_TAB_CAT} tabelas por catálogo serão documentadas. Use 0 para todas.")
 
@@ -374,8 +377,15 @@ def processar_tabela(t):
         for pos, c in enumerate(colunas, start=1)]
 
 pool = ThreadPoolExecutor(max_workers=PARALELISMO)
+tabelas_exec = 0   # tabelas novas nesta execução (limite MAX_TAB_EXEC)
+
+def limite_execucao():
+    return MAX_TAB_EXEC > 0 and tabelas_exec >= MAX_TAB_EXEC
 
 for cat in catalogos:
+    if limite_execucao():
+        print(f"\n⏹ limite de {MAX_TAB_EXEC} tabelas por execução atingido; rode de novo para continuar")
+        break
     print(f"\n📚 Catálogo {cat.name}")
     resumos, desc_schemas = [], {}
     tabelas_cat = colunas_cat = 0
@@ -387,6 +397,8 @@ for cat in catalogos:
         continue
 
     for sch in schemas:
+        if limite_execucao():
+            break
         if MAX_TAB_CAT > 0 and tabelas_cat >= MAX_TAB_CAT:
             print(f"   ⏭ limite de {MAX_TAB_CAT} tabelas atingido para {cat.name}")
             break
@@ -402,7 +414,10 @@ for cat in catalogos:
         pendentes = [t for t in tabelas if REPROCESSAR or t.full_name not in ja_gravadas]
         if MAX_TAB_CAT > 0:
             pendentes = pendentes[:MAX_TAB_CAT - tabelas_cat]
+        if MAX_TAB_EXEC > 0:
+            pendentes = pendentes[:MAX_TAB_EXEC - tabelas_exec]
         tabelas_cat += len(pendentes)
+        tabelas_exec += len(pendentes)
         if pendentes:
             print(f"   {len(pendentes)} tabelas a documentar ({len(tabelas) - len(pendentes)} já gravadas)")
 
