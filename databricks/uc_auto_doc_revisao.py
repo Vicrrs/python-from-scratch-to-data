@@ -556,3 +556,34 @@ display(spark.sql(f"""
 # MAGIC FROM existentes e
 # MAGIC LEFT JOIN documentadas d USING (catalogo)
 # MAGIC ORDER BY pct_cobertura, e.tabelas_existentes DESC;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Quem mais usa as tabelas já documentadas (últimos 90 dias), top 3 usuários por tabela.
+# MAGIC -- Fonte: system.access.table_lineage (cada leitura feita por notebook, job, dashboard, SQL editor...)
+# MAGIC WITH documentadas AS (
+# MAGIC   SELECT DISTINCT lower(caminho_tabela) AS tabela, catalogo, `schema`
+# MAGIC   FROM data_science_dev.churn_models.uc_doc_revisao
+# MAGIC ),
+# MAGIC uso AS (
+# MAGIC   SELECT lower(source_table_full_name)                                    AS tabela,
+# MAGIC          created_by                                                       AS usuario,
+# MAGIC          count(*)                                                         AS acessos,
+# MAGIC          count(DISTINCT event_date)                                       AS dias_com_uso,
+# MAGIC          max(event_time)                                                  AS ultimo_acesso,
+# MAGIC          array_join(collect_set(coalesce(entity_type, 'SQL/ad-hoc')), ', ') AS origens
+# MAGIC   FROM system.access.table_lineage
+# MAGIC   WHERE event_date >= current_date() - INTERVAL 90 DAYS
+# MAGIC     AND source_table_full_name IS NOT NULL
+# MAGIC   GROUP BY 1, 2
+# MAGIC )
+# MAGIC SELECT d.catalogo, d.`schema`, d.tabela, t.table_owner AS dono_tabela,
+# MAGIC        u.usuario, u.acessos, u.dias_com_uso, u.ultimo_acesso, u.origens,
+# MAGIC        row_number() OVER (PARTITION BY d.tabela ORDER BY u.acessos DESC) AS ranking
+# MAGIC FROM documentadas d
+# MAGIC JOIN uso u ON u.tabela = d.tabela
+# MAGIC LEFT JOIN system.information_schema.tables t
+# MAGIC   ON lower(concat_ws('.', t.table_catalog, t.table_schema, t.table_name)) = d.tabela
+# MAGIC QUALIFY ranking <= 3
+# MAGIC ORDER BY d.catalogo, d.tabela, ranking
