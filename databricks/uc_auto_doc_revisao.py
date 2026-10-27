@@ -36,9 +36,10 @@ dbutils.widgets.text("modelo_endpoint", "databricks-claude-sonnet-4-5", "Serving
 dbutils.widgets.text("idioma", "português do Brasil", "Idioma das descrições")
 dbutils.widgets.dropdown("reprocessar", "false", ["true", "false"], "Reprocessar tabelas já gravadas no destino")
 dbutils.widgets.text("linhas_amostra", "5", "Linhas de amostra por tabela")
-dbutils.widgets.text("max_tabelas_catalogo", "2", "Máx tabelas por catálogo (0 = todas)")
+dbutils.widgets.text("max_tabelas_catalogo", "0", "Máx tabelas por catálogo (0 = todas)")
 dbutils.widgets.text("preco_input_1m", "3.00", "US$ por 1M tokens de entrada")
 dbutils.widgets.text("preco_output_1m", "15.00", "US$ por 1M tokens de saída")
+dbutils.widgets.text("paralelismo", "8", "Tabelas documentadas em paralelo")
 
 def _lista(nome):
     return [x.strip() for x in dbutils.widgets.get(nome).split(",") if x.strip()]
@@ -56,10 +57,14 @@ N_AMOSTRA       = int(dbutils.widgets.get("linhas_amostra"))
 MAX_TAB_CAT     = int(dbutils.widgets.get("max_tabelas_catalogo"))
 PRECO_INPUT_1M  = float(dbutils.widgets.get("preco_input_1m"))
 PRECO_OUTPUT_1M = float(dbutils.widgets.get("preco_output_1m"))
+PARALELISMO     = int(dbutils.widgets.get("paralelismo"))
 
 MAX_COLS_POR_CHAMADA = 60   # tabelas largas são documentadas em lotes de colunas
 MAX_CHARS_VALOR      = 80   # trunca valores longos da amostra
-print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_tabelas_cat={MAX_TAB_CAT}")
+LOTE_GRAVACAO        = 50   # grava no destino a cada N tabelas (não perde progresso se cair)
+print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_tabelas_cat={MAX_TAB_CAT} | paralelismo={PARALELISMO}")
+if MAX_TAB_CAT > 0:
+    print(f"⚠ max_tabelas_catalogo={MAX_TAB_CAT}: só {MAX_TAB_CAT} tabelas por catálogo serão documentadas. Use 0 para todas.")
 
 # COMMAND ----------
 
@@ -101,7 +106,7 @@ print(f"{len(ja_gravadas)} tabelas já existem em {DESTINO}")
 
 # COMMAND ----------
 
-import json, re, time, datetime, uuid
+import json, re, time, datetime, uuid, threading
 # Widgets sobrevivem ao restartPython; relê caso a célula de Parâmetros não tenha rodado
 IDIOMA          = dbutils.widgets.get("idioma")
 MODELO          = dbutils.widgets.get("modelo_endpoint")
@@ -109,28 +114,40 @@ PRECO_INPUT_1M  = float(dbutils.widgets.get("preco_input_1m"))
 PRECO_OUTPUT_1M = float(dbutils.widgets.get("preco_output_1m"))
 from databricks.sdk import WorkspaceClient
 
-# Contador global de tokens; cada operação mede a diferença antes/depois
+# Contador global de tokens + contador por thread (tabelas rodam em paralelo);
+# cada operação mede a diferença antes/depois no contador da própria thread
 ID_EXECUCAO = str(uuid.uuid4())
 USO = {"chamadas": 0, "entrada": 0, "saida": 0}
+_lock_uso, _local = threading.Lock(), threading.local()
+
+def _uso_thread():
+    if not hasattr(_local, "uso"):
+        _local.uso = {"chamadas": 0, "entrada": 0, "saida": 0}
+    return _local.uso
 
 def _somar_uso(resp):
-    USO["chamadas"] += 1
     u = getattr(resp, "usage", None)
-    if u:
-        USO["entrada"] += u.prompt_tokens or 0
-        USO["saida"]   += u.completion_tokens or 0
+    delta = {"chamadas": 1,
+             "entrada": (u.prompt_tokens or 0) if u else 0,
+             "saida":   (u.completion_tokens or 0) if u else 0}
+    with _lock_uso:
+        for k, v in delta.items():
+            USO[k] += v
+    for k, v in delta.items():
+        _uso_thread()[k] += v
 
 def custo_usd(entrada, saida):
     return entrada / 1_000_000 * PRECO_INPUT_1M + saida / 1_000_000 * PRECO_OUTPUT_1M
 
 def inicio_operacao():
-    return dict(USO)
+    return dict(_uso_thread())
 
 def medir(objeto, inicio) -> dict:
-    """Tokens e custo gastos desde `inicio`."""
-    chamadas = USO["chamadas"] - inicio["chamadas"]
-    entrada  = USO["entrada"]  - inicio["entrada"]
-    saida    = USO["saida"]    - inicio["saida"]
+    """Tokens e custo gastos (pela thread atual) desde `inicio`."""
+    uso = _uso_thread()
+    chamadas = uso["chamadas"] - inicio["chamadas"]
+    entrada  = uso["entrada"]  - inicio["entrada"]
+    saida    = uso["saida"]    - inicio["saida"]
     custo    = round(custo_usd(entrada, saida), 6)
     if chamadas:
         print(f"      💲 {objeto}: {entrada + saida:,} tokens ≈ US$ {custo:.4f}")
@@ -166,7 +183,7 @@ Regras:
 - Descrições de colunas: até 200 caracteres. Tabelas/schemas/catálogos: até 500 caracteres.
 - Responda SOMENTE com JSON válido, sem markdown."""
 
-def chamar_llm(prompt: str, tentativas: int = 4) -> dict:
+def chamar_llm(prompt: str, tentativas: int = 6) -> dict:   # mais tentativas: paralelismo pode gerar 429
     for i in range(tentativas):
         try:
             resp = llm.chat.completions.create(
@@ -324,16 +341,41 @@ def gravar_resumos(resumos):
 # COMMAND ----------
 
 # ---------------- Varredura ----------------
-# Grava ao final de cada catálogo: se cair no meio, o que já rodou fica salvo e é pulado na próxima execução.
+# Tabelas são documentadas em paralelo (PARALELISMO threads) e gravadas a cada LOTE_GRAVACAO tabelas:
+# se cair no meio, o que já rodou fica salvo e é pulado na próxima execução.
+from concurrent.futures import ThreadPoolExecutor
 assert "llm" in globals() and "ja_gravadas" in globals(), "Rode as células anteriores antes (ou use Run all)."
 catalogos = [c for c in w.catalogs.list()
              if c.name not in CAT_EXCLUIR and (not CAT_INCLUIR or c.name in CAT_INCLUIR)]
 print(f"Catálogos a processar: {[c.name for c in catalogos]}")
 
+def processar_tabela(t):
+    """Documenta uma tabela; retorna (descricao_tabela, linhas) ou None se falhar."""
+    inicio = inicio_operacao()
+    try:
+        desc_tabela, desc_linha, colunas = documentar_tabela(t)
+    except Exception as e:
+        print(f"   ✗ {t.full_name}: {e}")
+        return None
+    m = medir(t.full_name, inicio)
+    agora = datetime.datetime.utcnow()
+    tipo_obj = "VIEW" if str(t.table_type).endswith("VIEW") else "TABLE"
+    return desc_tabela, [dict(
+        catalogo=t.catalog_name, schema=t.schema_name, tabela=t.name, caminho_tabela=t.full_name,
+        tipo_objeto=tipo_obj, posicao_coluna=pos, coluna=c["nome"], tipo_coluna=c["tipo"],
+        coluna_particao=c["particao"],
+        descricao_tabela=desc_tabela, descricao_linha=desc_linha, descricao_coluna=c["descricao"],
+        comentario_tabela_atual=t.comment, comentario_coluna_atual=c["comentario_atual"],
+        modelo=MODELO, id_execucao=ID_EXECUCAO, gerado_em=agora,
+        chamadas_llm_tabela=m["chamadas"], tokens_tabela=m["tokens"], custo_tabela_usd=m["custo"])
+        for pos, c in enumerate(colunas, start=1)]
+
+pool = ThreadPoolExecutor(max_workers=PARALELISMO)
+
 for cat in catalogos:
     print(f"\n📚 Catálogo {cat.name}")
-    linhas, resumos, desc_schemas = [], [], {}
-    tabelas_cat = 0
+    resumos, desc_schemas = [], {}
+    tabelas_cat = colunas_cat = 0
     try:
         schemas = [s for s in w.schemas.list(catalog_name=cat.name)
                    if s.name not in SCHEMA_EXCLUIR and (not SCHEMA_INCLUIR or s.name in SCHEMA_INCLUIR)]
@@ -354,42 +396,38 @@ for cat in catalogos:
 
         # contexto do schema: descrições já gravadas + as geradas agora
         desc_tabelas = {t.name: ja_gravadas[t.full_name] for t in tabelas if t.full_name in ja_gravadas}
+        pendentes = [t for t in tabelas if REPROCESSAR or t.full_name not in ja_gravadas]
+        if MAX_TAB_CAT > 0:
+            pendentes = pendentes[:MAX_TAB_CAT - tabelas_cat]
+        tabelas_cat += len(pendentes)
+        if pendentes:
+            print(f"   {len(pendentes)} tabelas a documentar ({len(tabelas) - len(pendentes)} já gravadas)")
+
         novas = 0
-        for t in tabelas:
-            if t.full_name in ja_gravadas and not REPROCESSAR:
-                continue
-            if MAX_TAB_CAT > 0 and tabelas_cat >= MAX_TAB_CAT:
-                break
-            inicio = inicio_operacao()
-            try:
-                desc_tabela, desc_linha, colunas = documentar_tabela(t)
-            except Exception as e:
-                print(f"   ✗ {t.full_name}: {e}")
-                continue
-            m = medir(t.full_name, inicio)
-            tabelas_cat += 1
-            novas += 1
-            desc_tabelas[t.name] = desc_tabela
-            agora = datetime.datetime.utcnow()
-            tipo_obj = "VIEW" if str(t.table_type).endswith("VIEW") else "TABLE"
-            for pos, c in enumerate(colunas, start=1):
-                linhas.append(dict(
-                    catalogo=cat.name, schema=sch.name, tabela=t.name, caminho_tabela=t.full_name,
-                    tipo_objeto=tipo_obj, posicao_coluna=pos, coluna=c["nome"], tipo_coluna=c["tipo"],
-                    coluna_particao=c["particao"],
-                    descricao_tabela=desc_tabela, descricao_linha=desc_linha, descricao_coluna=c["descricao"],
-                    comentario_tabela_atual=t.comment, comentario_coluna_atual=c["comentario_atual"],
-                    modelo=MODELO, id_execucao=ID_EXECUCAO, gerado_em=agora,
-                    chamadas_llm_tabela=m["chamadas"], tokens_tabela=m["tokens"], custo_tabela_usd=m["custo"]))
+        for i in range(0, len(pendentes), LOTE_GRAVACAO):
+            lote = pendentes[i:i + LOTE_GRAVACAO]
+            linhas = []
+            for t, res in zip(lote, pool.map(processar_tabela, lote)):
+                if res is None:
+                    continue
+                desc_tabelas[t.name], linhas_t = res
+                linhas += linhas_t
+                novas += 1
+            gravar_linhas(linhas)
+            colunas_cat += len(linhas)
+            print(f"   💾 {i + len(lote)}/{len(pendentes)} tabelas de {sch.full_name} processadas")
 
         if not desc_tabelas:
             continue
         if novas == 0 and not REPROCESSAR:
             # nada novo neste schema: reaproveita a descrição já gravada (sem custo)
-            desc_schemas[sch.name] = spark.sql(f"""
+            atual = spark.sql(f"""
                 SELECT max(descricao_schema) AS d FROM {DESTINO}
                 WHERE catalogo = '{cat.name}' AND `schema` = '{sch.name}'""").first().d
-            continue
+            if atual:
+                desc_schemas[sch.name] = atual
+                continue
+            # tabelas gravadas mas sem resumo (execução anterior interrompida): gera agora
         inicio = inicio_operacao()
         desc_schemas[sch.name] = resumir("schema", sch.full_name, desc_tabelas, sch.comment)
         m = medir(sch.full_name, inicio)
@@ -397,10 +435,7 @@ for cat in catalogos:
                             comentario_schema_atual=sch.comment, tokens_schema=m["tokens"],
                             custo_schema_usd=m["custo"]))
 
-    if not desc_schemas:
-        continue
-    gravar_linhas(linhas)   # antes do resumo, para o MERGE de schema/catálogo alcançar as linhas novas
-
+    # linhas já foram gravadas por lote, então o MERGE de schema/catálogo alcança as novas
     if resumos:
         inicio = inicio_operacao()
         desc_cat = resumir("catálogo", cat.name, desc_schemas, cat.comment)
@@ -415,8 +450,9 @@ for cat in catalogos:
             r.update(descricao_catalogo=desc_cat, comentario_catalogo_atual=cat.comment,
                      tokens_catalogo=m["tokens"], custo_catalogo_usd=m["custo"])
         gravar_resumos(resumos)
-    print(f"   💾 {len(linhas)} colunas gravadas em {DESTINO}")
+    print(f"   💾 {colunas_cat} colunas gravadas em {DESTINO}")
 
+pool.shutdown()
 print(f"\n💰 Execução {ID_EXECUCAO}: {USO['chamadas']} chamadas | {USO['entrada']:,} tokens entrada | "
       f"{USO['saida']:,} tokens saída | ≈ US$ {custo_usd(USO['entrada'], USO['saida']):.4f}")
 
@@ -479,27 +515,26 @@ display(spark.sql(f"""
 
 # COMMAND ----------
 
-
-WITH existentes AS (
-  SELECT table_catalog AS catalogo, COUNT(*) AS tabelas_existentes
-  FROM system.information_schema.tables
-  WHERE table_catalog NOT IN ('system', 'samples', 'hive_metastore', '__databricks_internal')
-    AND table_schema <> 'information_schema'
-  GROUP BY table_catalog
-),
-documentadas AS (
-  SELECT catalogo, COUNT(DISTINCT caminho_tabela) AS tabelas_documentadas,
-         ROUND(SUM(custo), 2) AS custo_usd
-  FROM (SELECT DISTINCT catalogo, caminho_tabela, custo_tabela_usd AS custo
-        FROM data_science_dev.churn_models.uc_doc_revisao)
-  GROUP BY catalogo
-)
-SELECT e.catalogo,
-       e.tabelas_existentes,
-       COALESCE(d.tabelas_documentadas, 0) AS tabelas_documentadas,
-       ROUND(100 * COALESCE(d.tabelas_documentadas, 0) / e.tabelas_existentes, 1) AS pct_cobertura,
-       COALESCE(d.custo_usd, 0) AS custo_usd
-FROM existentes e
-LEFT JOIN documentadas d USING (catalogo)
-ORDER BY pct_cobertura, e.tabelas_existentes DESC;
-
+# MAGIC %sql
+# MAGIC WITH existentes AS (
+# MAGIC   SELECT table_catalog AS catalogo, COUNT(*) AS tabelas_existentes
+# MAGIC   FROM system.information_schema.tables
+# MAGIC   WHERE table_catalog NOT IN ('system', 'samples', 'hive_metastore', '__databricks_internal')
+# MAGIC     AND table_schema <> 'information_schema'
+# MAGIC   GROUP BY table_catalog
+# MAGIC ),
+# MAGIC documentadas AS (
+# MAGIC   SELECT catalogo, COUNT(DISTINCT caminho_tabela) AS tabelas_documentadas,
+# MAGIC          ROUND(SUM(custo), 2) AS custo_usd
+# MAGIC   FROM (SELECT DISTINCT catalogo, caminho_tabela, custo_tabela_usd AS custo
+# MAGIC         FROM data_science_dev.churn_models.uc_doc_revisao)
+# MAGIC   GROUP BY catalogo
+# MAGIC )
+# MAGIC SELECT e.catalogo,
+# MAGIC        e.tabelas_existentes,
+# MAGIC        COALESCE(d.tabelas_documentadas, 0) AS tabelas_documentadas,
+# MAGIC        ROUND(100 * COALESCE(d.tabelas_documentadas, 0) / e.tabelas_existentes, 1) AS pct_cobertura,
+# MAGIC        COALESCE(d.custo_usd, 0) AS custo_usd
+# MAGIC FROM existentes e
+# MAGIC LEFT JOIN documentadas d USING (catalogo)
+# MAGIC ORDER BY pct_cobertura, e.tabelas_existentes DESC;
