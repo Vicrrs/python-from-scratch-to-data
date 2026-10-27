@@ -63,7 +63,6 @@ PARALELISMO     = int(dbutils.widgets.get("paralelismo"))
 
 MAX_COLS_POR_CHAMADA = 60   # tabelas largas são documentadas em lotes de colunas
 MAX_CHARS_VALOR      = 80   # trunca valores longos da amostra
-LOTE_GRAVACAO        = 50   # grava no destino a cada N tabelas (não perde progresso se cair)
 print(f"destino={DESTINO} | reprocessar={REPROCESSAR} | modelo={MODELO} | max_tabelas_cat={MAX_TAB_CAT} | "
       f"max_tabelas_exec={MAX_TAB_EXEC} | paralelismo={PARALELISMO}")
 if MAX_TAB_CAT > 0:
@@ -101,6 +100,9 @@ spark.sql(f"""
         revisado_por STRING, revisado_em TIMESTAMP
     ) COMMENT 'Descrições geradas por LLM para revisão do time responsável (não aplicadas no Unity Catalog)'
 """)
+# gravação em tempo real gera muitos MERGEs pequenos: o Delta compacta os arquivos sozinho
+spark.sql(f"""ALTER TABLE {DESTINO} SET TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true', 'delta.autoOptimize.autoCompact' = 'true')""")
 
 # Tabelas já gravadas no destino (pulamos se reprocessar=false) e suas descrições (contexto p/ resumo do schema)
 ja_gravadas = {r.caminho_tabela: r.descricao_tabela for r in spark.sql(
@@ -351,9 +353,9 @@ def gravar_resumos(resumos):
 
 # ---------------- Varredura ----------------
 # 1) planeja (só metadados), 2) documenta TODAS as tabelas num único pool de PARALELISMO threads,
-# gravando a cada LOTE_GRAVACAO tabelas sem parar as threads, 3) resume schemas/catálogos em paralelo.
+# gravando cada tabela assim que termina, sem parar as threads, 3) resume schemas/catálogos em paralelo.
 # Se cair no meio, o que já foi gravado é pulado na próxima execução.
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from collections import Counter, defaultdict
 assert "llm" in globals() and "ja_gravadas" in globals(), "Rode as células anteriores antes (ou use Run all)."
 catalogos = [c for c in w.catalogs.list()
@@ -420,25 +422,29 @@ for cat in catalogos:
         plano[cat.name].append((sch, tabelas, pendentes))
     print(f"📚 {cat.name}: {len(plano[cat.name])} schemas | {tabelas_cat} tabelas a documentar")
 
-# ---- 2) Documentação: todas as tabelas no mesmo pool; o MERGE roda na thread principal ----
+# ---- 2) Documentação: todas as tabelas no mesmo pool; grava em tempo real na thread principal ----
+# Cada tabela é gravada assim que termina; as que terminarem durante um MERGE entram juntas no próximo.
 todas = [t for itens in plano.values() for _, _, pend in itens for t in pend]
 print(f"\n🚀 {len(todas)} tabelas a documentar com {PARALELISMO} threads")
 desc_novas, novas_schema = {}, Counter()
-linhas, n_lote, t_ini = [], 0, time.time()
+feitas, t_ini = 0, time.time()
 futuros = {pool.submit(processar_tabela, t): t for t in todas}
-for i, f in enumerate(as_completed(futuros), start=1):
-    t, res = futuros[f], f.result()
-    if res is not None:
-        desc_novas[t.full_name], linhas_t = res
-        linhas += linhas_t
-        novas_schema[(t.catalog_name, t.schema_name)] += 1
-    n_lote += 1
-    if n_lote >= LOTE_GRAVACAO or i == len(todas):
-        gravar_linhas(linhas)
-        linhas, n_lote = [], 0
-        mins = (time.time() - t_ini) / 60
-        print(f"💾 {i}/{len(todas)} tabelas | {mins:.0f} min | ~{mins / i * (len(todas) - i):.0f} min restantes | "
-              f"≈ US$ {custo_usd(USO['entrada'], USO['saida']):.2f}")
+em_andamento = set(futuros)
+while em_andamento:
+    prontos, em_andamento = wait(em_andamento, return_when=FIRST_COMPLETED)
+    linhas = []
+    for f in prontos:
+        t, res = futuros[f], f.result()
+        if res is not None:
+            desc_novas[t.full_name], linhas_t = res
+            linhas += linhas_t
+            novas_schema[(t.catalog_name, t.schema_name)] += 1
+    gravar_linhas(linhas)
+    feitas += len(prontos)
+    mins = (time.time() - t_ini) / 60
+    print(f"💾 {feitas}/{len(todas)} tabelas gravadas | {mins:.0f} min | "
+          f"~{mins / feitas * (len(todas) - feitas):.0f} min restantes | "
+          f"≈ US$ {custo_usd(USO['entrada'], USO['saida']):.2f}")
 
 # ---- 3) Resumos de schema e catálogo ----
 # descrições de schema já gravadas (1 consulta só, em vez de 1 por schema)
@@ -609,3 +615,15 @@ display(spark.sql(f"""
 # MAGIC   ON lower(concat_ws('.', t.table_catalog, t.table_schema, t.table_name)) = d.tabela
 # MAGIC QUALIFY ranking <= 3
 # MAGIC ORDER BY d.catalogo, d.tabela, ranking
+
+
+# COMMAND ----------
+
+%sql 
+
+SELECT caminho_tabela, max(gerado_em) AS gravado_em, count(*) AS colunas
+FROM data_science_dev.churn_models.uc_doc_revisao
+GROUP BY 1 ORDER BY 2 DESC
+
+
+
