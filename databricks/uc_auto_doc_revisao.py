@@ -39,7 +39,7 @@ dbutils.widgets.text("linhas_amostra", "5", "Linhas de amostra por tabela")
 dbutils.widgets.text("max_tabelas_catalogo", "0", "Máx tabelas por catálogo (0 = todas)")
 dbutils.widgets.text("preco_input_1m", "3.00", "US$ por 1M tokens de entrada")
 dbutils.widgets.text("preco_output_1m", "15.00", "US$ por 1M tokens de saída")
-dbutils.widgets.text("paralelismo", "8", "Tabelas documentadas em paralelo")
+dbutils.widgets.text("paralelismo", "4","Tabelas documentadas em paralelo")
 
 def _lista(nome):
     return [x.strip() for x in dbutils.widgets.get(nome).split(",") if x.strip()]
@@ -211,10 +211,13 @@ def q(ident: str) -> str:
     return "`" + ident.replace("`", "``") + "`"
 
 def amostra(fqn: str):
+    # trunca no Spark (executors): só strings curtas chegam ao driver, evitando OOM em colunas grandes
+    from pyspark.sql import functions as F
     try:
-        rows = spark.table(fqn).limit(N_AMOSTRA).collect()
-        return [{k: (str(v)[:MAX_CHARS_VALOR] if v is not None else None)
-                 for k, v in r.asDict().items()} for r in rows]
+        df = spark.table(fqn).limit(N_AMOSTRA)
+        rows = df.select(*[F.substring(F.col(q(c)).cast("string"), 1, MAX_CHARS_VALOR).alias(c)
+                           for c in df.columns]).collect()
+        return [r.asDict() for r in rows]
     except Exception as e:
         return f"<amostra indisponível: {e.__class__.__name__}>"
 
