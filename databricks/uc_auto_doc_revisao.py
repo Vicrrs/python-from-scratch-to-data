@@ -619,11 +619,11 @@ display(spark.sql(f"""
 
 # COMMAND ----------
 
-%sql 
+# MAGIC %sql 
 
-SELECT caminho_tabela, max(gerado_em) AS gravado_em, count(*) AS colunas
-FROM data_science_dev.churn_models.uc_doc_revisao
-GROUP BY 1 ORDER BY 2 DESC
+# MAGIC SELECT caminho_tabela, max(gerado_em) AS gravado_em, count(*) AS colunas
+# MAGIC FROM data_science_dev.churn_models.uc_doc_revisao
+# MAGIC GROUP BY 1 ORDER BY 2 DESC
 
 
 
