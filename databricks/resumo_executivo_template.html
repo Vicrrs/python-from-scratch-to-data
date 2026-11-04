@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Resumo Executivo Matinal</title>
+<style type="text/css">
+  :root { color-scheme: light; supported-color-schemes: light; }
+  body { margin: 0; padding: 0; }
+  table { border-collapse: collapse; }
+  img { border: 0; display: block; height: auto; max-width: 100%; }
+  a { color: #1F4E79; }
+  @media only screen and (max-width: 660px) {
+    .container { width: 100% !important; }
+    .pad { padding-left: 20px !important; padding-right: 20px !important; }
+    .manchete { font-size: 24px !important; line-height: 31px !important; }
+    .kpi { display: block !important; float: left !important; width: 50% !important; box-sizing: border-box !important; border-right: 0 !important; padding: 0 8px 18px 0 !important; }
+    .kpi-valor { font-size: 24px !important; line-height: 30px !important; }
+    .rotulo-lateral { display: block !important; width: 100% !important; padding: 0 0 2px 0 !important; }
+    .texto-lateral { display: block !important; width: 100% !important; padding: 0 0 14px 0 !important; }
+    .botao { display: block !important; width: 100% !important; padding: 0 0 10px 0 !important; box-sizing: border-box !important; }
+    .tab { font-size: 13px !important; padding-left: 4px !important; padding-right: 4px !important; }
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#F1EFEA;">
+
+<!-- Pré-cabeçalho: aparece só na prévia da caixa de entrada -->
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#F1EFEA;">{{PREHEADER}}</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#F1EFEA" style="background-color:#F1EFEA;">
+<tr><td align="center" style="padding:24px 0;">
+
+<table role="presentation" class="container" width="640" cellpadding="0" cellspacing="0" border="0" bgcolor="#FFFFFF" style="width:640px;background-color:#FFFFFF;font-family:Arial,Helvetica,sans-serif;color:#16202B;">
+
+  <!-- CABEÇALHO -->
+  <tr><td class="pad" style="padding:30px 36px 16px 36px;border-top:4px solid #16202B;">
+    <div style="font-family:Georgia,'Times New Roman',serif;font-size:21px;line-height:27px;font-weight:bold;color:#16202B;">Resumo Executivo Matinal</div>
+    <div style="font-size:13px;line-height:20px;color:#4A5563;padding-top:4px;">{{DATA_EXTENSO}} &nbsp;·&nbsp; <span style="white-space:nowrap;">Dados até {{DADOS_ATE}}</span></div>
+  </td></tr>
+  <tr><td class="pad" style="padding:0 36px;"><div style="border-top:1px solid #DDD9D0;font-size:0;line-height:0;">&nbsp;</div></td></tr>
+
+  <!-- MANCHETE E RESUMO EM 30 SEGUNDOS -->
+  <tr><td class="pad" style="padding:26px 36px 8px 36px;">
+    <div style="font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.6px;color:{{STATUS_COR}};text-transform:uppercase;">{{STATUS_ROTULO}}</div>
+    <h1 class="manchete" style="margin:8px 0 0 0;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:36px;font-weight:normal;color:#16202B;">{{MANCHETE}}</h1>
+  </td></tr>
+  <tr><td class="pad" style="padding:14px 36px 28px 36px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td class="rotulo-lateral" width="128" valign="top" style="padding:0 12px 12px 0;font-size:14px;line-height:22px;font-weight:bold;color:#16202B;">O que aconteceu</td>
+        <td class="texto-lateral" valign="top" style="padding:0 0 12px 0;font-size:15px;line-height:22px;color:#2F3A47;">{{RESUMO_ACONTECEU}}</td>
+      </tr>
+      <tr>
+        <td class="rotulo-lateral" width="128" valign="top" style="padding:0 12px 12px 0;font-size:14px;line-height:22px;font-weight:bold;color:#16202B;">Por que importa</td>
+        <td class="texto-lateral" valign="top" style="padding:0 0 12px 0;font-size:15px;line-height:22px;color:#2F3A47;">{{RESUMO_IMPORTA}}</td>
+      </tr>
+      <tr>
+        <td class="rotulo-lateral" width="128" valign="top" style="padding:0 12px 0 0;font-size:14px;line-height:22px;font-weight:bold;color:#16202B;">O que fazer</td>
+        <td class="texto-lateral" valign="top" style="padding:0;font-size:15px;line-height:22px;color:#2F3A47;">{{RESUMO_FAZER}}</td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <!-- INDICADORES -->
+  <tr><td class="pad" bgcolor="#F8F7F3" style="padding:22px 36px 8px 36px;background-color:#F8F7F3;border-top:1px solid #DDD9D0;">
+    <div style="font-size:13px;line-height:18px;font-weight:bold;color:#16202B;">Os números <span style="font-weight:normal;color:#4A5563;">&nbsp;·&nbsp; {{PERIODO_REFERENCIA}}</span></div>
+  </td></tr>
+  <tr><td class="pad" bgcolor="#F8F7F3" style="padding:12px 36px 16px 36px;background-color:#F8F7F3;border-bottom:1px solid #DDD9D0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td class="kpi" width="25%" valign="top" style="padding:0 8px 8px 0;">
+          <div style="font-size:12px;line-height:16px;color:#4A5563;">{{KPI_1_NOME}}</div>
+          <div class="kpi-valor" style="font-family:Georgia,'Times New Roman',serif;font-size:25px;line-height:32px;color:#16202B;padding-top:4px;white-space:nowrap;">{{KPI_1_VALOR}}</div>
+          <div style="font-size:13px;line-height:18px;font-weight:bold;color:{{KPI_1_VAR_COR}};padding-top:2px;">{{KPI_1_VAR}}</div>
+          <div style="font-size:12px;line-height:16px;color:#5C6570;">{{KPI_1_META}}</div>
+        </td>
+        <td class="kpi" width="25%" valign="top" style="padding:0 8px 8px 8px;">
+          <div style="font-size:12px;line-height:16px;color:#4A5563;">{{KPI_2_NOME}}</div>
+          <div class="kpi-valor" style="font-family:Georgia,'Times New Roman',serif;font-size:25px;line-height:32px;color:#16202B;padding-top:4px;white-space:nowrap;">{{KPI_2_VALOR}}</div>
+          <div style="font-size:13px;line-height:18px;font-weight:bold;color:{{KPI_2_VAR_COR}};padding-top:2px;">{{KPI_2_VAR}}</div>
+          <div style="font-size:12px;line-height:16px;color:#5C6570;">{{KPI_2_META}}</div>
+        </td>
+        <td class="kpi" width="25%" valign="top" style="padding:0 8px 8px 8px;">
+          <div style="font-size:12px;line-height:16px;color:#4A5563;">{{KPI_3_NOME}}</div>
+          <div class="kpi-valor" style="font-family:Georgia,'Times New Roman',serif;font-size:25px;line-height:32px;color:#16202B;padding-top:4px;white-space:nowrap;">{{KPI_3_VALOR}}</div>
+          <div style="font-size:13px;line-height:18px;font-weight:bold;color:{{KPI_3_VAR_COR}};padding-top:2px;">{{KPI_3_VAR}}</div>
+          <div style="font-size:12px;line-height:16px;color:#5C6570;">{{KPI_3_META}}</div>
+        </td>
+        <td class="kpi" width="25%" valign="top" style="padding:0 0 8px 8px;">
+          <div style="font-size:12px;line-height:16px;color:#4A5563;">{{KPI_4_NOME}}</div>
+          <div class="kpi-valor" style="font-family:Georgia,'Times New Roman',serif;font-size:25px;line-height:32px;color:#16202B;padding-top:4px;white-space:nowrap;">{{KPI_4_VALOR}}</div>
+          <div style="font-size:13px;line-height:18px;font-weight:bold;color:{{KPI_4_VAR_COR}};padding-top:2px;">{{KPI_4_VAR}}</div>
+          <div style="font-size:12px;line-height:16px;color:#5C6570;">{{KPI_4_META}}</div>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <!-- PEDE SUA ATENÇÃO -->
+  <!-- INICIO:ALERTAS -->
+  <tr><td class="pad" style="padding:30px 36px 6px 36px;">
+    <h2 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:bold;color:#16202B;">Pede sua atenção</h2>
+  </td></tr>
+  <!-- INICIO:ALERTA_1 -->
+  <tr><td class="pad" style="padding:12px 36px 0 36px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="padding:2px 0 2px 14px;border-left:3px solid {{ALERTA_1_COR}};">
+        <div style="font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.4px;color:{{ALERTA_1_COR}};text-transform:uppercase;">{{ALERTA_1_SEVERIDADE}}</div>
+        <div style="font-size:15px;line-height:21px;font-weight:bold;color:#16202B;padding-top:2px;">{{ALERTA_1_TITULO}}</div>
+        <div style="font-size:14px;line-height:21px;color:#2F3A47;padding-top:2px;">{{ALERTA_1_IMPACTO}}</div>
+        <div style="font-size:13px;line-height:19px;color:#4A5563;padding-top:2px;">{{ALERTA_1_ACAO}}</div>
+      </td>
+    </tr></table>
+  </td></tr>
+  <!-- FIM:ALERTA_1 -->
+  <!-- INICIO:ALERTA_2 -->
+  <tr><td class="pad" style="padding:16px 36px 0 36px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="padding:2px 0 2px 14px;border-left:3px solid {{ALERTA_2_COR}};">
+        <div style="font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.4px;color:{{ALERTA_2_COR}};text-transform:uppercase;">{{ALERTA_2_SEVERIDADE}}</div>
+        <div style="font-size:15px;line-height:21px;font-weight:bold;color:#16202B;padding-top:2px;">{{ALERTA_2_TITULO}}</div>
+        <div style="font-size:14px;line-height:21px;color:#2F3A47;padding-top:2px;">{{ALERTA_2_IMPACTO}}</div>
+        <div style="font-size:13px;line-height:19px;color:#4A5563;padding-top:2px;">{{ALERTA_2_ACAO}}</div>
+      </td>
+    </tr></table>
+  </td></tr>
+  <!-- FIM:ALERTA_2 -->
+  <!-- INICIO:ALERTA_3 -->
+  <tr><td class="pad" style="padding:16px 36px 0 36px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="padding:2px 0 2px 14px;border-left:3px solid {{ALERTA_3_COR}};">
+        <div style="font-size:12px;line-height:16px;font-weight:bold;letter-spacing:0.4px;color:{{ALERTA_3_COR}};text-transform:uppercase;">{{ALERTA_3_SEVERIDADE}}</div>
+        <div style="font-size:15px;line-height:21px;font-weight:bold;color:#16202B;padding-top:2px;">{{ALERTA_3_TITULO}}</div>
+        <div style="font-size:14px;line-height:21px;color:#2F3A47;padding-top:2px;">{{ALERTA_3_IMPACTO}}</div>
+        <div style="font-size:13px;line-height:19px;color:#4A5563;padding-top:2px;">{{ALERTA_3_ACAO}}</div>
+      </td>
+    </tr></table>
+  </td></tr>
+  <!-- FIM:ALERTA_3 -->
+  <!-- FIM:ALERTAS -->
+
+  <!-- GRÁFICO PRINCIPAL -->
+  <tr><td class="pad" style="padding:34px 36px 0 36px;">
+    <h2 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:bold;color:#16202B;">{{GRAFICO_1_TITULO}}</h2>
+    <div style="font-size:13px;line-height:19px;color:#4A5563;padding-top:4px;">{{GRAFICO_1_SUBTITULO}}</div>
+    <img src="{{GRAFICO_1_SRC}}" width="568" alt="{{GRAFICO_1_ALT}}" style="display:block;width:100%;max-width:568px;height:auto;margin-top:12px;font-size:14px;line-height:20px;color:#4A5563;">
+    <div style="font-size:14px;line-height:21px;color:#2F3A47;padding-top:10px;">{{GRAFICO_1_LEITURA}}</div>
+  </td></tr>
+
+  <!-- TABELA -->
+  <tr><td class="pad" style="padding:34px 36px 0 36px;">
+    <h2 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:bold;color:#16202B;">{{TABELA_TITULO}}</h2>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:12px;border-collapse:collapse;">
+      <tr>
+        <th class="tab" align="left" style="padding:8px 8px 8px 0;font-size:12px;line-height:16px;font-weight:bold;color:#4A5563;border-bottom:2px solid #16202B;">{{TABELA_DIMENSAO}}</th>
+        <th class="tab" align="right" style="padding:8px;font-size:12px;line-height:16px;font-weight:bold;color:#4A5563;border-bottom:2px solid #16202B;">Realizado</th>
+        <th class="tab" align="right" style="padding:8px;font-size:12px;line-height:16px;font-weight:bold;color:#4A5563;border-bottom:2px solid #16202B;">vs. meta</th>
+        <th class="tab" align="right" style="padding:8px 0 8px 8px;font-size:12px;line-height:16px;font-weight:bold;color:#4A5563;border-bottom:2px solid #16202B;">vs. semana ant.</th>
+      </tr>
+      <tr>
+        <td class="tab" style="padding:9px 8px 9px 0;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_1_NOME}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_1_REALIZADO}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_1_META_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_1_META}}</td>
+        <td class="tab" align="right" style="padding:9px 0 9px 8px;font-size:14px;line-height:20px;color:{{TAB_1_SEMANA_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_1_SEMANA}}</td>
+      </tr>
+      <tr>
+        <td class="tab" style="padding:9px 8px 9px 0;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_2_NOME}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_2_REALIZADO}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_2_META_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_2_META}}</td>
+        <td class="tab" align="right" style="padding:9px 0 9px 8px;font-size:14px;line-height:20px;color:{{TAB_2_SEMANA_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_2_SEMANA}}</td>
+      </tr>
+      <tr>
+        <td class="tab" style="padding:9px 8px 9px 0;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_3_NOME}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_3_REALIZADO}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_3_META_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_3_META}}</td>
+        <td class="tab" align="right" style="padding:9px 0 9px 8px;font-size:14px;line-height:20px;color:{{TAB_3_SEMANA_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_3_SEMANA}}</td>
+      </tr>
+      <tr>
+        <td class="tab" style="padding:9px 8px 9px 0;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_4_NOME}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #E7E4DC;">{{TAB_4_REALIZADO}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_4_META_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_4_META}}</td>
+        <td class="tab" align="right" style="padding:9px 0 9px 8px;font-size:14px;line-height:20px;color:{{TAB_4_SEMANA_COR}};border-bottom:1px solid #E7E4DC;">{{TAB_4_SEMANA}}</td>
+      </tr>
+      <tr>
+        <td class="tab" style="padding:9px 8px 9px 0;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #16202B;">{{TAB_5_NOME}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;color:#16202B;border-bottom:1px solid #16202B;">{{TAB_5_REALIZADO}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_5_META_COR}};border-bottom:1px solid #16202B;">{{TAB_5_META}}</td>
+        <td class="tab" align="right" style="padding:9px 0 9px 8px;font-size:14px;line-height:20px;color:{{TAB_5_SEMANA_COR}};border-bottom:1px solid #16202B;">{{TAB_5_SEMANA}}</td>
+      </tr>
+      <tr>
+        <td class="tab" style="padding:9px 8px 9px 0;font-size:14px;line-height:20px;font-weight:bold;color:#16202B;">Total</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:#16202B;">{{TAB_TOTAL_REALIZADO}}</td>
+        <td class="tab" align="right" style="padding:9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_TOTAL_META_COR}};">{{TAB_TOTAL_META}}</td>
+        <td class="tab" align="right" style="padding:9px 0 9px 8px;font-size:14px;line-height:20px;font-weight:bold;color:{{TAB_TOTAL_SEMANA_COR}};">{{TAB_TOTAL_SEMANA}}</td>
+      </tr>
+    </table>
+  </td></tr>
+
+  <!-- GRÁFICO DE CAUSAS (opcional) -->
+  <!-- INICIO:GRAFICO_2 -->
+  <tr><td class="pad" style="padding:34px 36px 0 36px;">
+    <h2 style="margin:0;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:bold;color:#16202B;">{{GRAFICO_2_TITULO}}</h2>
+    <div style="font-size:13px;line-height:19px;color:#4A5563;padding-top:4px;">{{GRAFICO_2_SUBTITULO}}</div>
+    <img src="{{GRAFICO_2_SRC}}" width="568" alt="{{GRAFICO_2_ALT}}" style="display:block;width:100%;max-width:568px;height:auto;margin-top:12px;font-size:14px;line-height:20px;color:#4A5563;">
+    <div style="font-size:14px;line-height:21px;color:#2F3A47;padding-top:10px;">{{GRAFICO_2_LEITURA}}</div>
+  </td></tr>
+  <!-- FIM:GRAFICO_2 -->
+
+  <!-- RADAR DO DIA -->
+  <!-- INICIO:RADAR -->
+  <tr><td class="pad" style="padding:34px 36px 0 36px;">
+    <h2 style="margin:0 0 8px 0;font-family:Georgia,'Times New Roman',serif;font-size:20px;line-height:26px;font-weight:bold;color:#16202B;">No radar</h2>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+      <!-- INICIO:RADAR_1 -->
+      <tr>
+        <td class="rotulo-lateral" width="96" valign="top" style="padding:6px 12px 6px 0;font-size:14px;line-height:21px;font-weight:bold;color:#16202B;">{{RADAR_1_QUANDO}}</td>
+        <td class="texto-lateral" valign="top" style="padding:6px 0;font-size:14px;line-height:21px;color:#2F3A47;">{{RADAR_1_ITEM}}</td>
+      </tr>
+      <!-- FIM:RADAR_1 -->
+      <!-- INICIO:RADAR_2 -->
+      <tr>
+        <td class="rotulo-lateral" width="96" valign="top" style="padding:6px 12px 6px 0;font-size:14px;line-height:21px;font-weight:bold;color:#16202B;">{{RADAR_2_QUANDO}}</td>
+        <td class="texto-lateral" valign="top" style="padding:6px 0;font-size:14px;line-height:21px;color:#2F3A47;">{{RADAR_2_ITEM}}</td>
+      </tr>
+      <!-- FIM:RADAR_2 -->
+      <!-- INICIO:RADAR_3 -->
+      <tr>
+        <td class="rotulo-lateral" width="96" valign="top" style="padding:6px 12px 6px 0;font-size:14px;line-height:21px;font-weight:bold;color:#16202B;">{{RADAR_3_QUANDO}}</td>
+        <td class="texto-lateral" valign="top" style="padding:6px 0;font-size:14px;line-height:21px;color:#2F3A47;">{{RADAR_3_ITEM}}</td>
+      </tr>
+      <!-- FIM:RADAR_3 -->
+    </table>
+  </td></tr>
+  <!-- FIM:RADAR -->
+
+  <!-- CHAMADAS PARA AÇÃO -->
+  <tr><td class="pad" style="padding:30px 36px 34px 36px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td class="botao" style="padding:0 10px 0 0;">
+        <a href="{{LINK_PAINEL}}" style="display:block;background-color:#16202B;border:1px solid #16202B;color:#FFFFFF;font-size:14px;line-height:20px;font-weight:bold;text-decoration:none;text-align:center;padding:11px 20px;">Abrir painel completo</a>
+      </td>
+      <td class="botao" style="padding:0;">
+        <a href="{{LINK_GENIE}}" style="display:block;background-color:#FFFFFF;border:1px solid #16202B;color:#16202B;font-size:14px;line-height:20px;font-weight:bold;text-decoration:none;text-align:center;padding:11px 20px;">Perguntar ao Genie</a>
+      </td>
+    </tr></table>
+  </td></tr>
+
+  <!-- RODAPÉ -->
+  <tr><td class="pad" bgcolor="#F8F7F3" style="padding:20px 36px 24px 36px;background-color:#F8F7F3;border-top:1px solid #DDD9D0;font-size:12px;line-height:18px;color:#5C6570;">
+    <div><strong>Fontes:</strong> {{FONTES}}</div>
+    <div style="padding-top:6px;">Texto e análises gerados com IA a partir dos dados acima. Confirme no painel antes de decisões críticas.</div>
+    <div style="padding-top:6px;">Uso interno e confidencial. Dúvidas ou correções: <a href="mailto:{{CONTATO_EMAIL}}" style="color:#1F4E79;">{{CONTATO_EMAIL}}</a></div>
+  </td></tr>
+
+</table>
+
+</td></tr>
+</table>
+</body>
+</html>
