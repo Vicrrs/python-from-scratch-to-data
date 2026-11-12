@@ -5,7 +5,8 @@
 # MAGIC (Foundation Models `databricks-*`, modelos externos e endpoints custom) e abre um chat no próprio notebook.
 # MAGIC
 # MAGIC - A descoberta usa a mesma lógica do chat-especialistas: `serving_endpoints.list()` e filtro pela `task` do endpoint.
-# MAGIC - As chamadas usam `serving_endpoints.query(...)` com as **suas** credenciais.
+# MAGIC - As chamadas vão por HTTP direto em `/serving-endpoints/<nome>/invocations` com o **seu** token (capturado ao rodar a célula).
+# MAGIC - Ao rodar, testa um modelo padrão e já deixa selecionado o primeiro que responder.
 # MAGIC - O histórico fica em memória: trocar de modelo no meio da conversa continua a mesma conversa (útil para comparar).
 # MAGIC - Sem interface? Use `perguntar("...")` numa célula qualquer (última célula).
 # MAGIC
@@ -13,30 +14,27 @@
 
 # COMMAND ----------
 
-# Descomente se o runtime tiver um databricks-sdk antigo (sem serving_endpoints.query / ChatMessage)
+# Descomente se o runtime não tiver ipywidgets / databricks-sdk recente
 # %pip install -U databricks-sdk ipywidgets
 # dbutils.library.restartPython()
 
 # COMMAND ----------
 
 # ---------------- Descoberta dos modelos de chat ----------------
+import time
 from dataclasses import dataclass
 
+import requests
 from databricks.sdk import WorkspaceClient
 
+w = WorkspaceClient()  # só para listar os endpoints (roda dentro da célula, então a auth automática funciona)
 
-def criar_cliente() -> WorkspaceClient:
-    """Cliente com host/token explícitos.
-
-    Os callbacks dos botões (ipywidgets) rodam fora da execução de uma célula, e aí a autenticação
-    automática do notebook falha com "Missing api_token from command execution". Por isso o token é
-    capturado agora, enquanto a célula executa, e passado direto ao cliente.
-    """
-    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
-    return WorkspaceClient(host=ctx.apiUrl().get(), token=ctx.apiToken().get(), auth_type="pat")
-
-
-w = criar_cliente()
+# Os botões do ipywidgets rodam FORA da execução de uma célula: lá a auth automática do notebook falha com
+# "Missing api_token from command execution". Por isso o host/token são capturados AGORA e as chamadas ao
+# modelo são feitas por HTTP direto (requests), sem depender do contexto do notebook.
+_ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+HOST = _ctx.apiUrl().get().rstrip("/")
+TOKEN = _ctx.apiToken().get()
 
 
 @dataclass
@@ -91,24 +89,7 @@ def listar_modelos_chat() -> list[ModeloIA]:
     return sorted(modelos, key=lambda m: (not m.pronto, m.origem != "foundation", m.nome))
 
 
-MODELOS = listar_modelos_chat()
-assert MODELOS, "Nenhum endpoint de LLM de chat disponível para você. Verifique as permissões em Serving."
-PADRAO = next((m.nome for m in MODELOS if "llama-3-3-70b" in m.nome), MODELOS[0].nome)
-
-print(f"{len(MODELOS)} modelos de chat encontrados:")
-for m in MODELOS:
-    print(" -", m.rotulo)
-
-# COMMAND ----------
-
-# ---------------- Cliente de chat ----------------
-import time
-
-from databricks.sdk.service.serving import ChatMessage, ChatMessageRole
-
-PAPEIS = {"system": ChatMessageRole.SYSTEM, "user": ChatMessageRole.USER, "assistant": ChatMessageRole.ASSISTANT}
-
-
+# ---------------- Chamada ao modelo (HTTP direto) ----------------
 def _texto(conteudo) -> str:
     """Alguns modelos (ex.: Claude, reasoning) devolvem lista de blocos em vez de string."""
     if isinstance(conteudo, list):
@@ -124,25 +105,60 @@ def _texto(conteudo) -> str:
     return conteudo or ""
 
 
-def chamar_modelo(endpoint: str, historico: list[dict], temperatura: float, max_tokens: int) -> dict:
+def _post(endpoint: str, corpo: dict, timeout: int) -> requests.Response:
+    return requests.post(f"{HOST}/serving-endpoints/{endpoint}/invocations",
+                         headers={"Authorization": f"Bearer {TOKEN}"}, json=corpo, timeout=timeout)
+
+
+def chamar_modelo(endpoint: str, historico: list[dict], temperatura: float | None, max_tokens: int,
+                  timeout: int = 300) -> dict:
     """historico = [{"role": "system"|"user"|"assistant", "content": str}, ...]"""
-    msgs = [ChatMessage(role=PAPEIS[m["role"]], content=m["content"]) for m in historico]
+    corpo = {"messages": [{"role": m["role"], "content": m["content"]} for m in historico], "max_tokens": max_tokens}
+    if temperatura is not None:
+        corpo["temperature"] = temperatura
     inicio = time.time()
-    try:
-        r = w.serving_endpoints.query(endpoint, messages=msgs, temperature=temperatura, max_tokens=max_tokens)
-    except Exception as e:  # noqa: BLE001
-        # modelos de raciocínio costumam recusar temperature: tenta de novo sem
-        if "temperature" not in str(e).lower():
-            raise
-        r = w.serving_endpoints.query(endpoint, messages=msgs, max_tokens=max_tokens)
-    conteudo = r.choices[0].message.content if r.choices else ""
-    uso = r.usage
+    r = _post(endpoint, corpo, timeout)
+    if r.status_code == 400 and "temperature" in r.text.lower():
+        corpo.pop("temperature")  # modelos de raciocínio costumam recusar temperature
+        r = _post(endpoint, corpo, timeout)
+    if r.status_code >= 400:
+        raise RuntimeError(f"HTTP {r.status_code}: {r.text[:400]}")
+    dados = r.json()
+    escolhas = dados.get("choices") or []
+    conteudo = escolhas[0].get("message", {}).get("content") if escolhas else ""
+    uso = dados.get("usage") or {}
     return {
         "texto": _texto(conteudo),
         "segundos": time.time() - inicio,
-        "tokens_in": getattr(uso, "prompt_tokens", None) if uso else None,
-        "tokens_out": getattr(uso, "completion_tokens", None) if uso else None,
+        "tokens_in": uso.get("prompt_tokens"),
+        "tokens_out": uso.get("completion_tokens"),
     }
+
+
+# ---------------- Lista e escolhe um padrão que responde ----------------
+MODELOS = listar_modelos_chat()
+assert MODELOS, "Nenhum endpoint de LLM de chat disponível para você. Verifique as permissões em Serving."
+
+print(f"{len(MODELOS)} modelos de chat encontrados:")
+for m in MODELOS:
+    print(" -", m.rotulo)
+
+# Preferências para o padrão; depois qualquer foundation pronto. Testa com uma chamada mínima e fica com o 1º que responde.
+PREFERIDOS = ["llama-3-3-70b", "claude-sonnet", "gpt-oss-120b", "llama-4-maverick", "gemma"]
+candidatos = [m.nome for p in PREFERIDOS for m in MODELOS if p in m.nome and m.pronto]
+candidatos += [m.nome for m in MODELOS if m.pronto and m.origem == "foundation" and m.nome not in candidatos]
+candidatos += [m.nome for m in MODELOS if m.nome not in candidatos]
+
+PADRAO = None
+for nome in candidatos[:8]:
+    try:
+        chamar_modelo(nome, [{"role": "user", "content": "Responda só: ok"}], None, 16, timeout=60)
+        PADRAO = nome
+        break
+    except Exception as e:  # noqa: BLE001
+        print(f"   ✗ {nome}: {str(e)[:150]}")
+PADRAO = PADRAO or MODELOS[0].nome
+print(f"\nModelo padrão (testado): {PADRAO}")
 
 # COMMAND ----------
 
