@@ -24,7 +24,19 @@ from dataclasses import dataclass
 
 from databricks.sdk import WorkspaceClient
 
-w = WorkspaceClient()
+
+def criar_cliente() -> WorkspaceClient:
+    """Cliente com host/token explícitos.
+
+    Os callbacks dos botões (ipywidgets) rodam fora da execução de uma célula, e aí a autenticação
+    automática do notebook falha com "Missing api_token from command execution". Por isso o token é
+    capturado agora, enquanto a célula executa, e passado direto ao cliente.
+    """
+    ctx = dbutils.notebook.entry_point.getDbutils().notebook().getContext()
+    return WorkspaceClient(host=ctx.apiUrl().get(), token=ctx.apiToken().get(), auth_type="pat")
+
+
+w = criar_cliente()
 
 
 @dataclass
@@ -233,6 +245,8 @@ def enviar(_=None):
                                     "modelo": modelo, "meta": meta})
     except Exception as e:  # noqa: BLE001
         msg = str(e).split(" Config: ")[0][:500]
+        if any(s in msg.lower() for s in ("api_token", "invalid access token", "token expired", "401")):
+            msg += "\n\nO token do notebook expirou: rode de novo a célula 'Descoberta dos modelos' e depois a da interface."
         estado["historico"].append({"role": "assistant", "tipo": "erro", "modelo": modelo,
                                     "content": f"⚠️ Erro ao chamar `{modelo}`:\n\n```\n{msg}\n```"})
     finally:
